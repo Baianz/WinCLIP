@@ -55,9 +55,10 @@ This implementation is used to produce the WinCLIP results in our [CVPR'24 InCTR
 
 ```bibtex
 @inproceedings{zhu2024toward,
-  title={Toward Generalist Anomaly Detection via In-context Residual Learning with Few-shot Sample Prompts},
+  title={Toward generalist anomaly detection via in-context residual learning with few-shot sample prompts},
   author={Zhu, Jiawen and Pang, Guansong},
   booktitle={Proceedings of the IEEE/CVF conference on computer vision and pattern recognition},
+  pages={17826--17836},
   year={2024}
 }
 ```
