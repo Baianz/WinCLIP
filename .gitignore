@@ -4,3 +4,7 @@ __pycache__/
 *.pth
 *.bin
 *.log
+kernel_meta/
+torch_compile_debug/
+ascend_log/
+

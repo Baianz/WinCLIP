@@ -206,9 +206,10 @@ def benchmark_inference(model: torch.nn.Module, device: torch.device):
     for _ in range(50):
         start = time.perf_counter()
         with torch.no_grad():
-            img_feat, _, _ = model.encode_image(dummy_image)
-            txt_feat = model.encode_text(dummy_text)
-            sim = (100.0 * img_feat @ txt_feat.T).softmax(dim=-1)
+            img_out = model.encode_image(dummy_image)    # (F_w, F_p [1,225,896], CLS [1,640])
+            txt_feat = model.encode_text(dummy_text)     # [1, 640]
+            cls_feat = img_out[2] if isinstance(img_out, (tuple, list)) else img_out
+            sim = (100.0 * cls_feat @ txt_feat.T).softmax(dim=-1)
         torch.npu.synchronize()
         times_full.append(time.perf_counter() - start)
 
@@ -261,13 +262,24 @@ def optimize_for_npu(model: torch.nn.Module, device: torch.device) -> torch.nn.M
     # 3. 性能分析模式
     print("  [OPT] Static memory allocator configured")
     
-    # 4. 尝试图模式 (torch.compile)
+    # 4. 尝试图模式 (torch.compile) - 静态子模块
     try:
-        # 只编译 vision tower (最主要计算)
         if hasattr(model, 'visual'):
-            model.visual = torch.compile(model.visual, mode="reduce-overhead")
-            print("  [OPT] torch.compile applied to visual tower")
-            print("        mode=reduce-overhead (NPU graph mode)")
+            # 只编译无 window_masks 参数的部分
+            if hasattr(model.visual, 'transformer') or hasattr(model.visual, 'ln_post'):
+                # 编译 patch_embed + transformer blocks (不包window_masks)
+                sub_modules = []
+                if hasattr(model.visual, 'conv1'):
+                    model.visual.conv1 = torch.compile(model.visual.conv1, mode="reduce-overhead")
+                    sub_modules.append('conv1')
+                if hasattr(model.visual, 'transformer'):
+                    model.visual.transformer = torch.compile(model.visual.transformer, mode="reduce-overhead")
+                    sub_modules.append('transformer')
+                if sub_modules:
+                    print(f"  [OPT] torch.compile applied to visual sub-modules: {', '.join(sub_modules)}")
+                    print("        mode=reduce-overhead (NPU graph mode)")
+            else:
+                print("  [OPT] torch.compile skipped: no suitable sub-modules found")
     except Exception as e:
         print(f"  [OPT] torch.compile skipped: {e}")
 
@@ -307,9 +319,10 @@ def benchmark_optimized(
     for _ in range(100):
         start = time.perf_counter()
         with torch.no_grad(), amp_ctx:
-            img_feat, _, _ = model.encode_image(dummy_image)
-            txt_feat = model.encode_text(dummy_text)
-            _ = (100.0 * img_feat @ txt_feat.T).softmax(dim=-1)
+            img_out = model.encode_image(dummy_image)       # (F_w, F_p, CLS [1,640])
+            txt_feat = model.encode_text(dummy_text)         # [1, 640]
+            cls_feat = img_out[2] if isinstance(img_out, (tuple, list)) else img_out
+            _ = (100.0 * cls_feat @ txt_feat.T).softmax(dim=-1)
         torch.npu.synchronize()
         times.append(time.perf_counter() - start)
 
